@@ -1,94 +1,125 @@
-
-function myFunction() {
-  // use jQuery ($ is shorthand) to find the div on the page and then change the html
-  // jQuery can do a lot of crazy stuff so make sure to google around to find out more
-
-  $("#demo").html("NEWWW PARAGRAPH #javascript #fire");
-
-  // 'img-circle' is a bootstrap thing! Check out more here: http://getbootstrap.com/css/
-  $("#doge-image").append(`<img class="img-circle" src="/images/Signature.png" />`);
-}
-
-// This function sets up a listener- '.on()' gets called automatically whenever something saved in '/stream/' changes.
-// It's main purpose is to iterate over the stream in the database and add each message to the page.
-function initializeStreamListener() {
-  const databaseStreamReference = firebase.database().ref('/stream/');
-
-  databaseStreamReference.on('value', function(snapshot) {
-    var messages = snapshot.val();
-    $('#stream').empty();
-
-    if (messages) {
-      Object.keys(messages).forEach(function (key) {
-        const message = messages[key];
-        $('#stream').append(`<div>${message.body}</div>`);
-      });
-    }
-  });
-}
-
-// This function gets called with the new message information.
-// It gets the user information and uses both to add the post to the database.
-function addMessage(body, title) {
-  var user = firebase.auth().currentUser;
-  var authorPic = user.photoURL;
-  var author = user.displayName;
-
-  var postData = {
-    author: author,
-    authorPic: authorPic,
-    title: title,
-    body: body
-  };
-
-  var newPostKey = firebase.database().ref().child('stream').push().key;
-  firebase.database().ref('/stream/' + newPostKey).set(postData);
-}
+$(document).ready(function() {
 
 
-// This gets called whenver the form is submitted (check out the index.ejs).
-// Uses jQuery to get the message info and passes it to 'addMessage to actually submit the info to firebase.
-function handleMessageFormSubmit() {
-  var body = $('#new-post-body').val();
-  var title = $('#new-post-title').val();
+var MyModel = function() {
+	var me = this;
+	me.STATES = {
+		HOME: 0,
+		CHOOSE_ACTIVITIES: 1,
+		FIRST_QUESTIONS: 2,
+		TRANSITION_SCREEN: 3,
+		SECOND_QUESTIONS: 4,
+		RESULTS: 5
+	};
+	me.NUM_ACTIVITIES_TO_PICK = 2;
+	me.DESTINATIONS = ko.observableArray(DESTINATIONS);
+	me.state = ko.observable(me.STATES.HOME);
+	me.pickedActivities = ko.observableArray([]);
+	me.firstResults = ko.observableArray([]);
+	me.secondResults = ko.observableArray([]);
+	me.questionIndex = ko.observable(0);
 
-  addMessage(body, title);
-}
+	me.toggleActivity = function(activity) {
+		for (var i = 0; i < me.pickedActivities().length; i++) {
+			if (me.pickedActivities()[i].id == activity.id) {
+				me.pickedActivities.splice(i, 1); // delete it
+				return;
+			} 
+		}
+		me.pickedActivities.push(activity);
+	}
 
-// Gets called whenever the user clicks "sign in" or "sign out".
-function toggleSignIn() {
-  if (!firebase.auth().currentUser) { // if no user, handle login
-    var provider = new firebase.auth.GoogleAuthProvider();
-    provider.addScope('https://www.googleapis.com/auth/plus.login');
-    firebase.auth().signInWithPopup(provider).then(function(result) {
-      console.log("success");
-    }).catch(function(error) {
-      console.error("error", error);
-    });
-  } else { // handle logout
-    firebase.auth().signOut();
-  }
+	me.isPickedActivity = function(activity) {
+		for (var i = 0; i < me.pickedActivities().length; i++) {
+			if (me.pickedActivities()[i].id == activity.id) {
+				return true;
+			} 
+		}
+		return false;
+	}
 
-  //This disables the button until login or logout is successful
-  $('#login-button').attr("disabled", true);
-}
+	me.currentActivity = ko.pureComputed({
+		read: function() {
+			if (me.pickedActivities().length > me.questionIndex()) {
+				return me.pickedActivities()[me.questionIndex()];
+			} else {
+				return null;
+			}
+		}
+	});
 
+	me.selectTransport = function(name, details) {
+		if (me.state() == me.STATES.FIRST_QUESTIONS) {
+			var current = me.firstResults();
+			if (current.length <= me.questionIndex()) {
+				me.firstResults.push({"name": name, "details": details[name]});
+			} else {
+				current[me.questionIndex()] = {"name": name, "details": details[name]};
+				me.firstResults(current);
+			}
+		} else if (me.state() == me.STATES.SECOND_QUESTIONS) {
+			var current = me.secondResults();
+			if (current.length <= me.questionIndex()) {
+				me.secondResults.push({"name": name, "details": details[name]});
+			} else {
+				current[me.questionIndex()] = {"name": name, "details": details[name]};
+				me.secondResults(current);
+			}
+		} else {
+			return; 
+		}
+	}
 
-// The main purpose of this function is to set up a listener (using firebase) for when the auth state changes.
-// If a user isn't authenticated, we should not show the stream and prompt them to log in.
-// If a use IS authenticated, we should load/show the stream and give them the option to log out.
-window.onload = function() {
-  firebase.auth().onAuthStateChanged(function(user) {
-    if (user) {
-      $('#stream').show();
-      $('#login-button').html("Log out");
-      initializeStreamListener();
-    } else {
-      $('#stream').hide();
-      $('#login-button').html("Log in with google");
-    }
-    $('#login-button').attr("disabled", false);
-  });
-};
+	me.isPickedTransport = function(name) {
+		if (me.state() == me.STATES.FIRST_QUESTIONS) {
+			var current = me.firstResults();
+		} else if (me.state() == me.STATES.SECOND_QUESTIONS) {
+			var current = me.secondResults();
+		} else {
+			return false;
+		}
+		if (current.length > me.questionIndex()) {
+			return name == current[me.questionIndex()].name;
+		}
+		return false;
+	}
 
+	me.next = function() {
+		if (me.state() == me.STATES.FIRST_QUESTIONS) {
+			me.questionIndex(me.questionIndex()+1);
+			if (me.questionIndex() >= me.NUM_ACTIVITIES_TO_PICK) {
+				me.questionIndex(0);
+				me.state(me.STATES.TRANSITION_SCREEN);
+			}
+		} else if (me.state() == me.STATES.SECOND_QUESTIONS) {
+			me.questionIndex(me.questionIndex()+1);
+			if (me.questionIndex() >= me.NUM_ACTIVITIES_TO_PICK) {
+				me.questionIndex(0);
+				me.state(me.STATES.RESULTS);
+			}
+		}
+	}
 
+	me.totalCarbonFirst = ko.pureComputed({
+		read: function() {
+			var sum = 0;
+			me.firstResults().forEach(function(r) {
+				sum += parseFloat(r.details.carbon);
+			});
+			return sum;
+		}
+	});
+
+	me.totalCarbonSecond = ko.pureComputed({
+		read: function() {
+			var sum = 0;
+			me.secondResults().forEach(function(r) {
+				sum += parseFloat(r.details.carbon);
+			});
+			return sum;
+		}
+	});
+} // end of ko model
+
+ko.applyBindings(new MyModel());
+}); //end of document.ready
